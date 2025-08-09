@@ -128,17 +128,17 @@ pub const SysLoggerColour = enum {
     }
 };
 
-const global_syscall_manager: ?SyscallManager = null;
+var global_syscall_manager: ?SyscallManager = null;
 
 pub fn initRawPrinter() void {
     if (global_syscall_manager == null) {
         global_syscall_manager = SyscallManager{};
     }
-    const ntdll = win.GetModuleHandleW(W("ntdll.dll")).?;
-    const NtWriteFileP: [*]u8 = @ptrCast((win.GetProcAddress(ntdll, "NtWriteFile")).?);
+    const ntdll = win.kernel32.GetModuleHandleW(W("ntdll.dll")).?;
+    const NtWriteFileP: [*]u8 = @ptrCast((win.kernel32.GetProcAddress(ntdll, "NtWriteFile")).?);
 
-    const syscall: Syscall = try Syscall.fetch(NtWriteFileP);
-    global_syscall_manager.addNWF(syscall);
+    const syscall: Syscall = Syscall.fetch(NtWriteFileP) catch @panic("Could not find NtWriteFile");
+    global_syscall_manager.?.addNWF(syscall);
 }
 fn raw_printer(bytes: []const u8) void {
     //  mov     rax, gs:60h
@@ -150,7 +150,7 @@ fn raw_printer(bytes: []const u8) void {
         : "rax", "rcx", "rdi"
     );
     var io_block: win.IO_STATUS_BLOCK = undefined;
-    _ = global_syscall_manager.NtWriteFile(
+    _ = global_syscall_manager.?.NtWriteFile(
         stdout,
         0,
         0,
@@ -175,7 +175,7 @@ pub const CustomWriter = struct {
     /// The method that `std.fmt.format` calls to emit data.
     /// Must match signature: `fn writeAll(self: *CustomWriter, bytes: []const u8) !Error`.
     pub fn writeAll(_: Self, bytes: []const u8) !void {
-        if (global_syscall_manager) {
+        if (global_syscall_manager != null) {
             raw_printer(bytes);
         } else {
             return WriterError.RuntimeRawPrinterUnset;

@@ -29,6 +29,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         },
     );
+    test_mod.addImport("syscall_manager", syscall_module);
     test_mod.addImport("logger_lib", lib_mod);
 
     const lib_unit_tests = b.addTest(.{
