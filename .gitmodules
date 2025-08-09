@@ -1,3 +1,0 @@
-[submodule "deps/syscall_manager"]
-	path = deps/syscall_manager
-	url = git@github.com:forentfraps/syscall_manager.git

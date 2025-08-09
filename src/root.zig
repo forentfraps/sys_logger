@@ -14,8 +14,10 @@ pub const SysLogger = struct {
     colour_list: []SysLoggerColour, // Added colour_list
 
     pub fn init(comptime sz: usize, comptime pref_list: [sz][]const u8, comptime colour_list: [sz]SysLoggerColour) @This() {
+        std.debug.print("init\n", .{});
         if (global_syscall_manager == null) {
             initRawPrinter();
+            std.debug.print("Printer init\n", .{});
         }
         return .{
             .current_context = 0,

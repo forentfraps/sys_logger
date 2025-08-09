@@ -37,8 +37,8 @@
     // internet connectivity.
     .dependencies = .{
         .syscall_manager = .{
-            .url = ".\\deps\\syscall_manager\\",
-            .hash = "syscall_manager-0.0.0-M32yncc2awC7NbOYENY_3CRYWlXdXYzFrZcratjRbcje",
+            .url = "git+https://github.com/forentfraps/syscall_manager#5869957873df47fee894d0c709fb85efaf216686",
+            .hash = "syscall_manager-0.0.0-M32yndUzawDg8aSoRBGhPBlewIymgtoNRIAo6jBOU1Q5",
         },
     },
     .paths = .{
