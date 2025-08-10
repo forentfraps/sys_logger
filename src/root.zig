@@ -131,14 +131,17 @@ pub const SysLoggerColour = enum {
 var global_syscall_manager: ?SyscallManager = null;
 
 pub fn initRawPrinter() void {
-    if (global_syscall_manager == null) {
-        global_syscall_manager = SyscallManager{};
-    }
+    if (global_syscall_manager != null) return;
+
+    var mgr = SyscallManager.init();
+
     const ntdll = win.kernel32.GetModuleHandleW(W("ntdll.dll")).?;
     const NtWriteFileP: [*]u8 = @ptrCast((win.kernel32.GetProcAddress(ntdll, "NtWriteFile")).?);
 
-    const syscall: Syscall = Syscall.fetch(NtWriteFileP) catch @panic("Could not find NtWriteFile");
-    global_syscall_manager.?.addNWF(syscall);
+    // Register the real ntdll export into the generic table
+    mgr.addFromStub(.NtWriteFile, NtWriteFileP) catch @panic("Could not register NtWriteFile");
+
+    global_syscall_manager = mgr;
 }
 fn raw_printer(bytes: []const u8) void {
     //  mov     rax, gs:60h
@@ -149,18 +152,21 @@ fn raw_printer(bytes: []const u8) void {
         :
         : "rax", "rcx", "rdi"
     );
+
     var io_block: win.IO_STATUS_BLOCK = undefined;
-    _ = global_syscall_manager.?.NtWriteFile(
-        stdout,
-        0,
-        0,
-        0,
-        &io_block,
-        bytes.ptr,
-        bytes.len,
-        0,
-        0,
-    ) catch return;
+
+    // Single generic call for every syscall
+    _ = global_syscall_manager.?.invoke(.NtWriteFile, .{
+        stdout, // FileHandle: usize
+        0, // Event
+        0, // ApcRoutine
+        0, // ApcContext
+        &io_block, // *IO_STATUS_BLOCK
+        bytes.ptr, // [*]const u8
+        bytes.len, // usize
+        0, // ByteOffset
+        0, // Key
+    }) catch return;
 }
 
 const WriterError = error{
