@@ -13,7 +13,9 @@ pub const SysLogger = struct {
     pref_list: []const []const u8,
     colour_list: []SysLoggerColour, // Added colour_list
 
-    pub fn init(comptime sz: usize, comptime pref_list: [sz][]const u8, comptime colour_list: [sz]SysLoggerColour) @This() {
+    const Self = @This();
+
+    pub fn init(comptime sz: usize, comptime pref_list: [sz][]const u8, comptime colour_list: [sz]SysLoggerColour) Self {
         if (global_syscall_manager == null) {
             initRawPrinter();
         }
@@ -27,7 +29,7 @@ pub const SysLogger = struct {
         };
     }
 
-    pub fn info(self: @This(), comptime msg: []const u8, args: anytype) void {
+    pub fn info(self: Self, comptime msg: []const u8, args: anytype) void {
         if (!self.enabled) {
             return;
         }
@@ -40,7 +42,7 @@ pub const SysLogger = struct {
         print("{s}[{s}] {s}{s}", .{ colour.getAnsiCode(), prefix, formatted_msg, SysLoggerColour.getReset() });
     }
 
-    pub fn crit(self: @This(), comptime msg: []const u8, args: anytype) void {
+    pub fn crit(self: Self, comptime msg: []const u8, args: anytype) void {
         if (!self.enabled) {
             return;
         }
@@ -51,7 +53,7 @@ pub const SysLogger = struct {
 
         print("{s}[{s}]{s}{s}", .{ SysLoggerColour.getCrit(), prefix, formatted_msg, SysLoggerColour.getReset() });
     }
-    pub fn info16(self: @This(), comptime msg: []const u8, args: anytype, arg16: []const u16) void {
+    pub fn info16(self: Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
         if (!self.enabled) {
             return;
         }
@@ -68,7 +70,7 @@ pub const SysLogger = struct {
         print("{s}\n", .{SysLoggerColour.getReset()});
     }
 
-    pub fn crit16(self: @This(), comptime msg: []const u8, args: anytype, arg16: []const u16) void {
+    pub fn crit16(self: Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
         if (!self.enabled) {
             return;
         }
@@ -83,15 +85,15 @@ pub const SysLogger = struct {
         print("{s}\n", .{SysLoggerColour.getReset()});
     }
 
-    pub fn setContext(self: *@This(), ctx: anytype) void {
+    pub fn setContext(self: *Self, ctx: anytype) void {
         self.current_context = self.current_context << 4 | @as(u256, @intFromEnum(ctx));
     }
 
-    pub fn rollbackContext(self: *@This()) void {
+    pub fn rollbackContext(self: *Self) void {
         self.current_context >>= 4;
     }
 
-    pub fn getContext(self: @This()) usize {
+    pub fn getContext(self: Self) usize {
         const current_context_decoded: usize = @intCast(@as(u4, @truncate(self.current_context)));
         return current_context_decoded;
     }
@@ -107,7 +109,9 @@ pub const SysLoggerColour = enum {
     cyan,
     none,
 
-    pub fn getAnsiCode(self: @This()) []const u8 {
+    const Self = @This();
+
+    pub fn getAnsiCode(self: Self) []const u8 {
         return switch (self) {
             .red => "\x1b[31;40m",
             .blue => "\x1b[34;40m",
@@ -150,8 +154,7 @@ fn raw_printer(bytes: []const u8) void {
     const stdout = asm volatile (".byte 0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00, 0x48, 0x8B, 0x48, 0x20, 0x48, 0x8B, 0x79, 0x28\n"
         : [ret] "={rdi}" (-> usize),
         :
-        : "rax", "rcx", "rdi"
-    );
+        : .{ .rax = true, .rcx = true, .rdi = true });
 
     var io_block: win.IO_STATUS_BLOCK = undefined;
 
@@ -174,32 +177,47 @@ const WriterError = error{
 };
 
 pub const CustomWriter = struct {
-    /// The error set for this writer.
-    pub const Error = anyerror;
     pub const Self = @This();
 
-    /// The method that `std.fmt.format` calls to emit data.
-    /// Must match signature: `fn writeAll(self: *CustomWriter, bytes: []const u8) !Error`.
-    pub fn writeAll(_: Self, bytes: []const u8) !void {
-        if (global_syscall_manager != null) {
-            raw_printer(bytes);
-        } else {
-            return WriterError.RuntimeRawPrinterUnset;
-        }
+    pub const Writer = struct {
+        interface: std.Io.Writer,
 
-        return; // no error
-    }
-    pub fn writeBytesNTimes(self: Self, bytes: []const u8, n: usize) anyerror!void {
-        var i: usize = 0;
-        while (i < n) : (i += 1) {
-            try self.writeAll(bytes);
+        fn drain(io_w: *std.Io.Writer, parts: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+            const self: *Writer = @fieldParentPtr("interface", io_w);
+            _ = self; 
+
+            if (global_syscall_manager == null) {
+                return error.WriteFailed;
+            }
+
+            const piece = if (splat > 0) parts[parts.len - 1] else parts[0];
+            raw_printer(piece);
+            return piece.len;
         }
+    };
+
+    pub fn writer(self: *Self, buffer: []u8) Writer {
+        _ = self;
+        return .{
+            .interface = .{
+                .buffer = buffer,
+                .vtable = &.{ .drain = Writer.drain },
+            },
+        };
     }
 };
 
-/// A function that behaves like `std.debug.print` but sends data to `CustomWriter`.
+/// Like `std.debug.print` but routed through `CustomWriter` on 0.15.1.
+/// Note: use buffering and flush if you care about perf.
 pub fn print(comptime fmt: []const u8, args: anytype) void {
-    const writer = CustomWriter{};
-    // IMPORTANT: pass &writer so `std.fmt.format` can call writeAll on *CustomWriter
-    std.fmt.format(writer, fmt, args) catch @panic("CustomPrintFailed");
+    var cw = CustomWriter{};
+    // You can choose a real buffer size; zero-length disables buffering.
+    var buf: [0]u8 = undefined;
+    var w = cw.writer(buf[0..]);
+    const io: *std.Io.Writer = &w.interface;
+
+    // New API: call .print on the Writer interface.
+    io.print(fmt, args) catch @panic("CustomPrintFailed");
+    // Flushing is a no-op for our minimal drain-only writer, but harmless.
+    io.flush() catch {};
 }
