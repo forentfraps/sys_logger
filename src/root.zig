@@ -28,6 +28,9 @@ pub const SysLogger = struct {
             .colour_list = @constCast(&colour_list),
         };
     }
+    pub fn raw_print(_: Self, comptime msg: []const u8, args: anytype) void {
+        print(msg, .{args});
+    }
 
     pub fn info(self: Self, comptime msg: []const u8, args: anytype) void {
         if (!self.enabled) {
@@ -184,7 +187,7 @@ pub const CustomWriter = struct {
 
         fn drain(io_w: *std.Io.Writer, parts: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
             const self: *Writer = @fieldParentPtr("interface", io_w);
-            _ = self; 
+            _ = self;
 
             if (global_syscall_manager == null) {
                 return error.WriteFailed;
