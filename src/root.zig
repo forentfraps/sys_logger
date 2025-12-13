@@ -29,7 +29,7 @@ pub const SysLogger = struct {
         };
     }
     pub fn raw_print(_: Self, comptime msg: []const u8, args: anytype) void {
-        print(msg, .{args});
+        print(msg, args);
     }
 
     pub fn info(self: Self, comptime msg: []const u8, args: anytype) void {
