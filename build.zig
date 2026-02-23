@@ -1,43 +1,40 @@
 const std = @import("std");
-
 pub fn build(b: *std.Build) void {
     var target = b.standardTargetOptions(.{});
     target.result.os.tag = .windows;
-
     const optimize = b.standardOptimizeOption(.{});
-
-    const syscall_dep = b.dependency("syscall_manager", .{ .target = target, .optimize = optimize });
-    const syscall_module = syscall_dep.module("syscall_manager");
     const lib_mod = b.addModule("sys_logger", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    const syscall_dep = b.dependency("syscall_manager", .{});
+    const syscall_module = syscall_dep.module("syscall_manager");
     lib_mod.addImport("syscall_manager", syscall_module);
-
+    const zigwin32 = b.dependency("zigwin32", .{});
+    lib_mod.addImport("zigwin32", zigwin32.module("win32"));
     const lib = b.addLibrary(.{
-        // .linkage = .static,
         .name = "sys_logger",
         .root_module = lib_mod,
     });
     b.installArtifact(lib);
 
-    const test_mod = b.createModule(
-        .{
-            .root_source_file = b.path("src/tests.zig"),
-            .target = target,
-            .optimize = optimize,
-        },
-    );
-    test_mod.addImport("syscall_manager", syscall_module);
-    test_mod.addImport("logger_lib", lib_mod);
-
-    const lib_unit_tests = b.addTest(.{
-        .root_module = test_mod,
+    const exe_mod = b.createModule(.{
+        .root_source_file = b.path("src/tests.zig"),
+        .target = target,
+        .optimize = optimize,
     });
+    exe_mod.addImport("zigwin32", zigwin32.module("win32"));
+    exe_mod.addImport("syscall_manager", syscall_module);
+    exe_mod.addImport("root.zig", lib_mod);
 
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    const exe = b.addExecutable(.{
+        .name = "tests",
+        .root_module = exe_mod,
+    });
+    b.installArtifact(exe);
 
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+    const run = b.addRunArtifact(exe);
+    const run_step = b.step("test", "Run the test binary");
+    run_step.dependOn(&run.step);
 }

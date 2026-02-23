@@ -2,10 +2,11 @@ const std = @import("std");
 const testing = std.testing;
 
 const logger_mod = @import("root.zig");
-const win = std.os.windows;
+const win = @import("zigwin32").everything;
 const SysLogger = logger_mod.SysLogger;
 const SysLoggerColour = logger_mod.SysLoggerColour;
-test "SysLogger honours compile-time prefix / colour tables" {
+
+pub fn main() void {
     const prefixes = [_][]const u8{ "BOOT", "AUTH" };
     const colours = [_]SysLoggerColour{ .green, .red };
 
@@ -13,5 +14,5 @@ test "SysLogger honours compile-time prefix / colour tables" {
 
     log.info("Success\n", .{});
 
-    //Teest does not pass if called from zig build test, because mutexes...
+    //Test does not pass if called from zig build test, because mutexes...
 }

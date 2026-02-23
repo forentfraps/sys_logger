@@ -1,17 +1,17 @@
 const std = @import("std");
 const SyscallManager = @import("syscall_manager").SyscallManager;
 const Syscall = @import("syscall_manager").Syscall;
-const win = std.os.windows;
+const win = @import("zigwin32").everything;
 
 const W = std.unicode.utf8ToUtf16LeStringLiteral;
-pub extern "kernel32" fn GetModuleHandleW(
-    lpModuleName: [*:0]const win.WCHAR,
-) callconv(.winapi) ?win.HMODULE;
-
-pub extern "kernel32" fn GetProcAddress(
-    module: win.HMODULE,
-    procName: [*:0]const u8,
-) callconv(.winapi) ?win.FARPROC;
+// pub extern "kernel32" fn GetModuleHandleW(
+//     lpModuleName: [*:0]const win.WCHAR,
+// ) callconv(.winapi) ?win.HMODULE;
+//
+// pub extern "kernel32" fn GetProcAddress(
+//     module: win.HMODULE,
+//     procName: [*:0]const u8,
+// ) callconv(.winapi) ?win.FARPROC;
 
 pub const SysLogger = struct {
     current_context: u256,
@@ -150,8 +150,8 @@ pub fn initRawPrinter() void {
 
     var mgr = SyscallManager.init();
 
-    const ntdll = GetModuleHandleW(W("ntdll.dll")).?;
-    const NtWriteFileP: [*]u8 = @ptrCast((GetProcAddress(ntdll, "NtWriteFile")).?);
+    const ntdll = win.GetModuleHandleW(W("ntdll.dll")).?;
+    const NtWriteFileP: [*]const u8 = @ptrCast((win.GetProcAddress(ntdll, "NtWriteFile")).?);
 
     // Register the real ntdll export into the generic table
     mgr.addFromStub(.NtWriteFile, NtWriteFileP) catch @panic("Could not register NtWriteFile");
