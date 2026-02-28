@@ -1,17 +1,10 @@
 const std = @import("std");
 const SyscallManager = @import("syscall_manager").SyscallManager;
 const Syscall = @import("syscall_manager").Syscall;
-const win = @import("zigwin32").everything;
+const win = @import("zigwin32");
+const builtin = @import("builtin");
 
 const W = std.unicode.utf8ToUtf16LeStringLiteral;
-// pub extern "kernel32" fn GetModuleHandleW(
-//     lpModuleName: [*:0]const win.WCHAR,
-// ) callconv(.winapi) ?win.HMODULE;
-//
-// pub extern "kernel32" fn GetProcAddress(
-//     module: win.HMODULE,
-//     procName: [*:0]const u8,
-// ) callconv(.winapi) ?win.FARPROC;
 
 pub const SysLogger = struct {
     current_context: u256,
@@ -41,59 +34,67 @@ pub const SysLogger = struct {
     }
 
     pub fn info(self: Self, comptime msg: []const u8, args: anytype) void {
-        if (!self.enabled) {
-            return;
-        }
-        const context_index = self.getContext();
-        const prefix = self.pref_list[context_index];
-        const colour = self.colour_list[context_index];
-        var buf: [256]u8 = undefined;
-        const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
+        if (builtin.mode == .Debug) {
+            if (!self.enabled) {
+                return;
+            }
+            const context_index = self.getContext();
+            const prefix = self.pref_list[context_index];
+            const colour = self.colour_list[context_index];
+            var buf: [256]u8 = undefined;
+            const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
 
-        print("{s}[{s}] {s}{s}", .{ colour.getAnsiCode(), prefix, formatted_msg, SysLoggerColour.getReset() });
+            print("{s}[{s}] {s}{s}", .{ colour.getAnsiCode(), prefix, formatted_msg, SysLoggerColour.getReset() });
+        }
     }
 
     pub fn crit(self: Self, comptime msg: []const u8, args: anytype) void {
-        if (!self.enabled) {
-            return;
-        }
-        const context_index = self.getContext();
-        const prefix = self.pref_list[context_index];
-        var buf: [256]u8 = undefined;
-        const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
+        if (builtin.mode == .Debug) {
+            if (!self.enabled) {
+                return;
+            }
+            const context_index = self.getContext();
+            const prefix = self.pref_list[context_index];
+            var buf: [256]u8 = undefined;
+            const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
 
-        print("{s}[{s}]{s}{s}", .{ SysLoggerColour.getCrit(), prefix, formatted_msg, SysLoggerColour.getReset() });
+            print("{s}[{s}]{s}{s}", .{ SysLoggerColour.getCrit(), prefix, formatted_msg, SysLoggerColour.getReset() });
+        }
     }
     pub fn info16(self: Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
-        if (!self.enabled) {
-            return;
-        }
-        const context_index = self.getContext();
-        const prefix = self.pref_list[context_index];
-        const colour = self.colour_list[context_index];
-        var buf: [256]u8 = undefined;
-        const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
+        if (builtin.mode == .Debug) {
+            if (!self.enabled) {
+                return;
+            }
+            const context_index = self.getContext();
+            const prefix = self.pref_list[context_index];
+            const colour = self.colour_list[context_index];
+            var buf: [256]u8 = undefined;
+            const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
 
-        print("{s}[{s}] {s} -> ", .{ colour.getAnsiCode(), prefix, formatted_msg });
-        for (0..arg16.len) |i| {
-            print("{u}", .{arg16[i]});
+            print("{s}[{s}] {s} -> ", .{ colour.getAnsiCode(), prefix, formatted_msg });
+            for (0..arg16.len) |i| {
+                print("{u}", .{arg16[i]});
+            }
+            print("{s}\n", .{SysLoggerColour.getReset()});
         }
-        print("{s}\n", .{SysLoggerColour.getReset()});
     }
 
     pub fn crit16(self: Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
-        if (!self.enabled) {
-            return;
+        if (builtin.mode == .Debug) {
+            if (!self.enabled) {
+                return;
+            }
+            const context_index = self.getContext();
+            const prefix = self.pref_list[context_index];
+            var buf: [256]u8 = undefined;
+            const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
+            print("{s} [{s}] {s} -> ", .{ SysLoggerColour.getCrit(), prefix, formatted_msg });
+            for (0..arg16.len) |i| {
+                print("{u}", .{arg16[i]});
+            }
+            print("{s}\n", .{SysLoggerColour.getReset()});
         }
-        const context_index = self.getContext();
-        const prefix = self.pref_list[context_index];
-        var buf: [256]u8 = undefined;
-        const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
-        print("{s} [{s}] {s} -> ", .{ SysLoggerColour.getCrit(), prefix, formatted_msg });
-        for (0..arg16.len) |i| {
-            print("{u}", .{arg16[i]});
-        }
-        print("{s}\n", .{SysLoggerColour.getReset()});
     }
 
     pub fn setContext(self: *Self, ctx: anytype) void {
@@ -150,8 +151,10 @@ pub fn initRawPrinter() void {
 
     var mgr = SyscallManager.init();
 
-    const ntdll = win.GetModuleHandleW(W("ntdll.dll")).?;
-    const NtWriteFileP: [*]const u8 = @ptrCast((win.GetProcAddress(ntdll, "NtWriteFile")).?);
+    const ntdll = win.system.library_loader.GetModuleHandleW(
+        W("ntdll.dll"),
+    ).?;
+    const NtWriteFileP: [*]const u8 = @ptrCast((win.system.library_loader.GetProcAddress(ntdll, "NtWriteFile")).?);
 
     // Register the real ntdll export into the generic table
     mgr.addFromStub(.NtWriteFile, NtWriteFileP) catch @panic("Could not register NtWriteFile");
@@ -167,7 +170,7 @@ fn raw_printer(bytes: []const u8) void {
         :
         : .{ .rax = true, .rcx = true, .rdi = true });
 
-    var io_block: win.IO_STATUS_BLOCK = undefined;
+    var io_block: win.system.windows_programming.IO_STATUS_BLOCK = undefined;
 
     // Single generic call for every syscall
     _ = global_syscall_manager.?.invoke(.NtWriteFile, .{

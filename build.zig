@@ -37,4 +37,6 @@ pub fn build(b: *std.Build) void {
     const run = b.addRunArtifact(exe);
     const run_step = b.step("test", "Run the test binary");
     run_step.dependOn(&run.step);
+
+    b.step("check", "zls step").dependOn(&exe.step);
 }
