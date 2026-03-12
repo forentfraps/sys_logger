@@ -1,148 +1,9 @@
 const std = @import("std");
 const SyscallManager = @import("syscall_manager").SyscallManager;
 const Syscall = @import("syscall_manager").Syscall;
-const win = @import("zigwin32");
 const builtin = @import("builtin");
-
+const win = @import("zigwin32");
 const W = std.unicode.utf8ToUtf16LeStringLiteral;
-
-pub const SysLogger = struct {
-    current_context: u256,
-    enabled: bool,
-    colour_crit: SysLoggerColour,
-    colour_info: SysLoggerColour,
-    pref_list: []const []const u8,
-    colour_list: []SysLoggerColour, // Added colour_list
-
-    const Self = @This();
-
-    pub fn init(comptime sz: usize, comptime pref_list: [sz][]const u8, comptime colour_list: [sz]SysLoggerColour) Self {
-        if (global_syscall_manager == null) {
-            initRawPrinter();
-        }
-        return .{
-            .current_context = 0,
-            .enabled = true,
-            .colour_crit = SysLoggerColour.red,
-            .colour_info = SysLoggerColour.blue,
-            .pref_list = &pref_list,
-            .colour_list = @constCast(&colour_list),
-        };
-    }
-    pub fn raw_print(_: Self, comptime msg: []const u8, args: anytype) void {
-        print(msg, args);
-    }
-
-    pub fn info(self: Self, comptime msg: []const u8, args: anytype) void {
-        if (builtin.mode == .Debug) {
-            if (!self.enabled) {
-                return;
-            }
-            const context_index = self.getContext();
-            const prefix = self.pref_list[context_index];
-            const colour = self.colour_list[context_index];
-            var buf: [256]u8 = undefined;
-            const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
-
-            print("{s}[{s}] {s}{s}", .{ colour.getAnsiCode(), prefix, formatted_msg, SysLoggerColour.getReset() });
-        }
-    }
-
-    pub fn crit(self: Self, comptime msg: []const u8, args: anytype) void {
-        if (builtin.mode == .Debug) {
-            if (!self.enabled) {
-                return;
-            }
-            const context_index = self.getContext();
-            const prefix = self.pref_list[context_index];
-            var buf: [256]u8 = undefined;
-            const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
-
-            print("{s}[{s}]{s}{s}", .{ SysLoggerColour.getCrit(), prefix, formatted_msg, SysLoggerColour.getReset() });
-        }
-    }
-    pub fn info16(self: Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
-        if (builtin.mode == .Debug) {
-            if (!self.enabled) {
-                return;
-            }
-            const context_index = self.getContext();
-            const prefix = self.pref_list[context_index];
-            const colour = self.colour_list[context_index];
-            var buf: [256]u8 = undefined;
-            const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
-
-            print("{s}[{s}] {s} -> ", .{ colour.getAnsiCode(), prefix, formatted_msg });
-            for (0..arg16.len) |i| {
-                print("{u}", .{arg16[i]});
-            }
-            print("{s}\n", .{SysLoggerColour.getReset()});
-        }
-    }
-
-    pub fn crit16(self: Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
-        if (builtin.mode == .Debug) {
-            if (!self.enabled) {
-                return;
-            }
-            const context_index = self.getContext();
-            const prefix = self.pref_list[context_index];
-            var buf: [256]u8 = undefined;
-            const formatted_msg = std.fmt.bufPrint(&buf, msg, args) catch return;
-            print("{s} [{s}] {s} -> ", .{ SysLoggerColour.getCrit(), prefix, formatted_msg });
-            for (0..arg16.len) |i| {
-                print("{u}", .{arg16[i]});
-            }
-            print("{s}\n", .{SysLoggerColour.getReset()});
-        }
-    }
-
-    pub fn setContext(self: *Self, ctx: anytype) void {
-        self.current_context = self.current_context << 4 | @as(u256, @intFromEnum(ctx));
-    }
-
-    pub fn rollbackContext(self: *Self) void {
-        self.current_context >>= 4;
-    }
-
-    pub fn getContext(self: Self) usize {
-        const current_context_decoded: usize = @intCast(@as(u4, @truncate(self.current_context)));
-        return current_context_decoded;
-    }
-};
-
-pub const SysLoggerColour = enum {
-    red,
-    blue,
-    green,
-    white,
-    pink,
-    yellow,
-    cyan,
-    none,
-
-    const Self = @This();
-
-    pub fn getAnsiCode(self: Self) []const u8 {
-        return switch (self) {
-            .red => "\x1b[31;40m",
-            .blue => "\x1b[34;40m",
-            .green => "\x1b[32;40m",
-            .white => "\x1b[37;40m",
-            .cyan => "\x1b[36;40m",
-            .pink => "\x1b[35;40m",
-            .yellow => "\x1b[33;40m",
-            .none => "\x1b[0;0m",
-        };
-    }
-
-    pub fn getCrit() []const u8 {
-        return "\x1b[37;41m";
-    }
-    pub fn getReset() []const u8 {
-        return "\x1b[0;0m";
-    }
-};
 
 var global_syscall_manager: ?SyscallManager = null;
 
@@ -234,4 +95,365 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     io.print(fmt, args) catch @panic("CustomPrintFailed");
     // Flushing is a no-op for our minimal drain-only writer, but harmless.
     io.flush() catch {};
+}
+
+pub const LoggerBackend = enum {
+    nt_write_file,
+    std_debug,
+};
+
+pub const SysLoggerColour = enum {
+    none,
+
+    black,
+    red,
+    green,
+    yellow,
+    blue,
+    magenta,
+    cyan,
+    white,
+
+    bright_black,
+    bright_red,
+    bright_green,
+    bright_yellow,
+    bright_blue,
+    bright_magenta,
+    bright_cyan,
+    bright_white,
+
+    gray,
+    orange,
+    pink,
+
+    white_on_red,
+    black_on_yellow,
+    black_on_cyan,
+
+    pub fn ansi(self: @This()) []const u8 {
+        return switch (self) {
+            .none => "\x1b[0m",
+
+            .black => "\x1b[30m",
+            .red => "\x1b[31m",
+            .green => "\x1b[32m",
+            .yellow => "\x1b[33m",
+            .blue => "\x1b[34m",
+            .magenta => "\x1b[35m",
+            .cyan => "\x1b[36m",
+            .white => "\x1b[37m",
+
+            .bright_black => "\x1b[90m",
+            .bright_red => "\x1b[91m",
+            .bright_green => "\x1b[92m",
+            .bright_yellow => "\x1b[93m",
+            .bright_blue => "\x1b[94m",
+            .bright_magenta => "\x1b[95m",
+            .bright_cyan => "\x1b[96m",
+            .bright_white => "\x1b[97m",
+
+            .gray => "\x1b[38;5;245m",
+            .orange => "\x1b[38;5;208m",
+            .pink => "\x1b[38;5;213m",
+
+            .white_on_red => "\x1b[37;41m",
+            .black_on_yellow => "\x1b[30;43m",
+            .black_on_cyan => "\x1b[30;46m",
+        };
+    }
+
+    pub fn reset() []const u8 {
+        return "\x1b[0m";
+    }
+};
+
+pub const default_palette = [_]SysLoggerColour{
+    .bright_green,
+    .bright_blue,
+    .bright_cyan,
+    .bright_yellow,
+    .bright_magenta,
+    .orange,
+    .pink,
+    .green,
+    .blue,
+    .cyan,
+    .yellow,
+    .magenta,
+    .gray,
+    .white,
+};
+
+pub const LoggerOptions = struct {
+    enabled: bool = true,
+    debug_only: bool = true,
+    backend: LoggerBackend = .nt_write_file,
+
+    // Replaces the old u256-packed history with a real stack.
+    max_context_depth: usize = 256,
+
+    // Formatting buffers.
+    msg_buf_size: usize = 1024,
+    line_buf_size: usize = 1536,
+    ctx_buf_size: usize = 256,
+
+    // Output style.
+    show_function: bool = true,
+    show_line: bool = true,
+    show_context_chain: bool = true,
+
+    info_palette: []const SysLoggerColour = default_palette[0..],
+    crit_colour: SysLoggerColour = .white_on_red,
+};
+
+pub const NullScope = struct {
+    pub inline fn end(_: @This()) void {}
+};
+
+pub const NullLogger = struct {
+    pub inline fn init() @This() {
+        return .{};
+    }
+
+    pub inline fn raw_print(_: *@This(), comptime _: []const u8, _: anytype) void {}
+    pub inline fn info(_: *@This(), comptime _: []const u8, _: anytype) void {}
+    pub inline fn info16(_: *@This(), comptime _: []const u8, _: anytype, _: []const u16) void {}
+    pub inline fn crit(_: *@This(), comptime _: []const u8, _: anytype) void {}
+    pub inline fn crit16(_: *@This(), comptime _: []const u8, _: anytype, _: []const u16) void {}
+
+    pub inline fn setContext(_: *@This(), comptime _: []const u8) void {}
+    pub inline fn push(_: *@This(), comptime _: []const u8) NullScope {
+        return .{};
+    }
+
+    pub inline fn pushEnum(_: *@This(), _: anytype) NullScope {
+        return .{};
+    }
+
+    pub inline fn rollbackContext(_: *@This()) void {}
+};
+
+pub fn SysLogger(comptime opts: LoggerOptions) type {
+    const compile_enabled = opts.enabled and (!opts.debug_only or builtin.mode == .Debug);
+    return if (compile_enabled) ActiveLogger(opts) else NullLogger;
+}
+
+fn ActiveLogger(comptime opts: LoggerOptions) type {
+    return struct {
+        enabled: bool = true,
+        context_depth: usize = 0,
+        context_stack: [opts.max_context_depth][]const u8 = undefined,
+
+        const Self = @This();
+
+        pub const Scope = struct {
+            logger: *Self,
+
+            pub inline fn end(self: @This()) void {
+                self.logger.rollbackContext();
+            }
+        };
+
+        const Severity = enum {
+            info,
+            crit,
+        };
+
+        pub inline fn init() Self {
+            if (opts.backend == .nt_write_file) {
+                initRawPrinter();
+            }
+            return .{};
+        }
+
+        pub inline fn raw_print(self: *Self, comptime msg: []const u8, args: anytype) void {
+            if (!self.enabled) return;
+            emit(msg, args);
+        }
+
+        pub inline fn info(self: *Self, comptime msg: []const u8, args: anytype) void {
+            self.log(.info, @src(), msg, args);
+        }
+
+        pub inline fn crit(self: *Self, comptime msg: []const u8, args: anytype) void {
+            self.log(.crit, @src(), msg, args);
+        }
+
+        pub inline fn info16(self: *Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
+            self.log16(.info, @src(), msg, args, arg16);
+        }
+
+        pub inline fn crit16(self: *Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
+            self.log16(.crit, @src(), msg, args, arg16);
+        }
+
+        // Optional manual context labels when function name alone is not enough.
+        pub inline fn setContext(self: *Self, comptime label: []const u8) void {
+            if (self.context_depth >= opts.max_context_depth) return;
+            self.context_stack[self.context_depth] = label;
+            self.context_depth += 1;
+        }
+
+        pub inline fn push(self: *Self, comptime label: []const u8) Scope {
+            self.setContext(label);
+            return .{ .logger = self };
+        }
+
+        // Zero setup enum support:
+        //   var s = log.pushEnum(.ImpFix); defer s.end();
+        pub inline fn pushEnum(self: *Self, tag: anytype) Scope {
+            return self.push(@tagName(tag));
+        }
+
+        pub inline fn rollbackContext(self: *Self) void {
+            if (self.context_depth == 0) return;
+            self.context_depth -= 1;
+        }
+
+        fn log(
+            self: *Self,
+            comptime sev: Severity,
+            comptime src: std.builtin.SourceLocation,
+            comptime msg: []const u8,
+            args: anytype,
+        ) void {
+            if (!self.enabled) return;
+
+            var msg_buf: [opts.msg_buf_size]u8 = undefined;
+            const payload = std.fmt.bufPrint(&msg_buf, msg, args) catch return;
+
+            var line_buf: [opts.line_buf_size]u8 = undefined;
+            const fn_name = shortFnName(src.fn_name);
+            const colour = switch (sev) {
+                .info => colourForLabel(fn_name),
+                .crit => opts.crit_colour,
+            };
+
+            const full_line = if (opts.show_context_chain and self.context_depth != 0) blk: {
+                var ctx_buf: [opts.ctx_buf_size]u8 = undefined;
+                const ctx = self.contextChain(&ctx_buf);
+                break :blk std.fmt.bufPrint(
+                    &line_buf,
+                    "{s}[{s}:{d} | {s}] {s}{s}\n",
+                    .{ colour.ansi(), fn_name, src.line, ctx, payload, SysLoggerColour.reset() },
+                ) catch return;
+            } else blk: {
+                break :blk std.fmt.bufPrint(
+                    &line_buf,
+                    "{s}[{s}:{d}] {s}{s}\n",
+                    .{ colour.ansi(), fn_name, src.line, payload, SysLoggerColour.reset() },
+                ) catch return;
+            };
+
+            writeBytes(full_line);
+        }
+
+        fn log16(
+            self: *Self,
+            comptime sev: Severity,
+            comptime src: std.builtin.SourceLocation,
+            comptime msg: []const u8,
+            args: anytype,
+            arg16: []const u16,
+        ) void {
+            if (!self.enabled) return;
+
+            var msg_buf: [opts.msg_buf_size]u8 = undefined;
+            const payload = std.fmt.bufPrint(&msg_buf, msg, args) catch return;
+
+            var line_buf: [opts.line_buf_size]u8 = undefined;
+            const fn_name = shortFnName(src.fn_name);
+            const colour = switch (sev) {
+                .info => colourForLabel(fn_name),
+                .crit => opts.crit_colour,
+            };
+
+            const prefix = if (opts.show_context_chain and self.context_depth != 0) blk: {
+                var ctx_buf: [opts.ctx_buf_size]u8 = undefined;
+                const ctx = self.contextChain(&ctx_buf);
+                break :blk std.fmt.bufPrint(
+                    &line_buf,
+                    "{s}[{s}:{d} | {s}] {s} -> ",
+                    .{ colour.ansi(), fn_name, src.line, ctx, payload },
+                ) catch return;
+            } else blk: {
+                break :blk std.fmt.bufPrint(
+                    &line_buf,
+                    "{s}[{s}:{d}] {s} -> ",
+                    .{ colour.ansi(), fn_name, src.line, payload },
+                ) catch return;
+            };
+
+            writeBytes(prefix);
+            writeUtf16Lossy(arg16);
+            writeBytes(SysLoggerColour.reset());
+            writeBytes("\n");
+        }
+
+        fn emit(comptime fmt: []const u8, args: anytype) void {
+            var buf: [opts.line_buf_size]u8 = undefined;
+            const out = std.fmt.bufPrint(&buf, fmt, args) catch return;
+            writeBytes(out);
+        }
+
+        fn writeBytes(bytes: []const u8) void {
+            switch (opts.backend) {
+                .nt_write_file => raw_printer(bytes),
+                .std_debug => std.debug.print("{s}", .{bytes}),
+            }
+        }
+
+        fn writeUtf16Lossy(text: []const u16) void {
+            var utf8_buf: [4]u8 = undefined;
+
+            for (text) |cu| {
+                // Cheap BMP-only output for logs. Surrogates become '?'.
+                const cp: u21 = if (cu >= 0xD800 and cu <= 0xDFFF)
+                    @as(u21, '?')
+                else
+                    @as(u21, cu);
+
+                const len = std.unicode.utf8Encode(cp, &utf8_buf) catch continue;
+                writeBytes(utf8_buf[0..len]);
+            }
+        }
+
+        fn shortFnName(full: []const u8) []const u8 {
+            const idx = std.mem.lastIndexOfScalar(u8, full, '.') orelse return full;
+            return full[idx + 1 ..];
+        }
+
+        fn colourForLabel(label: []const u8) SysLoggerColour {
+            var h: u32 = 2166136261;
+            for (label) |c| {
+                h = (h ^ c) *% 16777619;
+            }
+            return opts.info_palette[h % opts.info_palette.len];
+        }
+
+        fn contextChain(self: *Self, out: []u8) []const u8 {
+            var used: usize = 0;
+            const sep = " > ";
+
+            for (self.context_stack[0..self.context_depth], 0..) |ctx, i| {
+                if (i != 0) {
+                    if (used + sep.len > out.len) break;
+                    @memcpy(out[used .. used + sep.len], sep[0..]);
+                    used += sep.len;
+                }
+
+                const remaining = out.len - used;
+                if (remaining == 0) break;
+
+                const n = @min(remaining, ctx.len);
+                @memcpy(out[used .. used + n], ctx[0..n]);
+                used += n;
+
+                if (n != ctx.len) break;
+            }
+
+            return out[0..used];
+        }
+    };
 }
