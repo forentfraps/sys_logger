@@ -247,6 +247,11 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
 
         const Self = @This();
 
+        const CallerSite = struct {
+            fn_name: []const u8 = "???",
+            line: u64 = 0,
+        };
+
         pub const Scope = struct {
             logger: *Self,
 
@@ -272,23 +277,23 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             emit(msg, args);
         }
 
+        // Keep wrappers inline so the call to log()/log16() is emitted at the user callsite.
         pub inline fn info(self: *Self, comptime msg: []const u8, args: anytype) void {
-            self.log(.info, @src(), msg, args);
+            self.log(.info, msg, args);
         }
 
         pub inline fn crit(self: *Self, comptime msg: []const u8, args: anytype) void {
-            self.log(.crit, @src(), msg, args);
+            self.log(.crit, msg, args);
         }
 
         pub inline fn info16(self: *Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
-            self.log16(.info, @src(), msg, args, arg16);
+            self.log16(.info, msg, args, arg16);
         }
 
         pub inline fn crit16(self: *Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
-            self.log16(.crit, @src(), msg, args, arg16);
+            self.log16(.crit, msg, args, arg16);
         }
 
-        // Optional manual context labels when function name alone is not enough.
         pub inline fn setContext(self: *Self, comptime label: []const u8) void {
             if (self.context_depth >= opts.max_context_depth) return;
             self.context_stack[self.context_depth] = label;
@@ -300,8 +305,6 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             return .{ .logger = self };
         }
 
-        // Zero setup enum support:
-        //   var s = log.pushEnum(.ImpFix); defer s.end();
         pub inline fn pushEnum(self: *Self, tag: anytype) Scope {
             return self.push(@tagName(tag));
         }
@@ -311,10 +314,27 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             self.context_depth -= 1;
         }
 
-        fn log(
+        fn resolveCallerSite(ret_addr: usize, scratch: []u8) CallerSite {
+            // ret_addr is the address *after* the call. Move back into the callsite.
+            const lookup_addr = ret_addr -| 1;
+
+            var fba = std.heap.FixedBufferAllocator.init(scratch);
+            const gpa = fba.allocator();
+            var threaded = std.Io.Threaded.init(gpa, .{});
+            const io = threaded.io();
+
+            const di = std.debug.getSelfDebugInfo() catch return .{};
+            const sym = di.getSymbol(io, lookup_addr) catch return .{};
+
+            return .{
+                .fn_name = if (sym.name) |name| shortFnName(name) else "???",
+                .line = if (sym.source_location) |loc| loc.line else 0,
+            };
+        }
+
+        noinline fn log(
             self: *Self,
             comptime sev: Severity,
-            comptime src: std.builtin.SourceLocation,
             comptime msg: []const u8,
             args: anytype,
         ) void {
@@ -323,10 +343,12 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             var msg_buf: [opts.msg_buf_size]u8 = undefined;
             const payload = std.fmt.bufPrint(&msg_buf, msg, args) catch return;
 
+            var caller_scratch: [512]u8 = undefined;
+            const site = resolveCallerSite(@returnAddress(), caller_scratch[0..]);
+
             var line_buf: [opts.line_buf_size]u8 = undefined;
-            const fn_name = shortFnName(src.fn_name);
             const colour = switch (sev) {
-                .info => colourForLabel(fn_name),
+                .info => colourForLabel(site.fn_name),
                 .crit => opts.crit_colour,
             };
 
@@ -336,23 +358,22 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
                 break :blk std.fmt.bufPrint(
                     &line_buf,
                     "{s}[{s}:{d} | {s}] {s}{s}\n",
-                    .{ colour.ansi(), fn_name, src.line, ctx, payload, SysLoggerColour.reset() },
+                    .{ colour.ansi(), site.fn_name, site.line, ctx, payload, SysLoggerColour.reset() },
                 ) catch return;
             } else blk: {
                 break :blk std.fmt.bufPrint(
                     &line_buf,
                     "{s}[{s}:{d}] {s}{s}\n",
-                    .{ colour.ansi(), fn_name, src.line, payload, SysLoggerColour.reset() },
+                    .{ colour.ansi(), site.fn_name, site.line, payload, SysLoggerColour.reset() },
                 ) catch return;
             };
 
             writeBytes(full_line);
         }
 
-        fn log16(
+        noinline fn log16(
             self: *Self,
             comptime sev: Severity,
-            comptime src: std.builtin.SourceLocation,
             comptime msg: []const u8,
             args: anytype,
             arg16: []const u16,
@@ -362,10 +383,12 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             var msg_buf: [opts.msg_buf_size]u8 = undefined;
             const payload = std.fmt.bufPrint(&msg_buf, msg, args) catch return;
 
+            var caller_scratch: [512]u8 = undefined;
+            const site = resolveCallerSite(@returnAddress(), caller_scratch[0..]);
+
             var line_buf: [opts.line_buf_size]u8 = undefined;
-            const fn_name = shortFnName(src.fn_name);
             const colour = switch (sev) {
-                .info => colourForLabel(fn_name),
+                .info => colourForLabel(site.fn_name),
                 .crit => opts.crit_colour,
             };
 
@@ -375,13 +398,13 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
                 break :blk std.fmt.bufPrint(
                     &line_buf,
                     "{s}[{s}:{d} | {s}] {s} -> ",
-                    .{ colour.ansi(), fn_name, src.line, ctx, payload },
+                    .{ colour.ansi(), site.fn_name, site.line, ctx, payload },
                 ) catch return;
             } else blk: {
                 break :blk std.fmt.bufPrint(
                     &line_buf,
                     "{s}[{s}:{d}] {s} -> ",
-                    .{ colour.ansi(), fn_name, src.line, payload },
+                    .{ colour.ansi(), site.fn_name, site.line, payload },
                 ) catch return;
             };
 
@@ -408,7 +431,6 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             var utf8_buf: [4]u8 = undefined;
 
             for (text) |cu| {
-                // Cheap BMP-only output for logs. Surrogates become '?'.
                 const cp: u21 = if (cu >= 0xD800 and cu <= 0xDFFF)
                     @as(u21, '?')
                 else
