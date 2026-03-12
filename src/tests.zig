@@ -1,11 +1,18 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const logger_mod = @import("root.zig");
 const W = std.unicode.utf8ToUtf16LeStringLiteral;
 
-const Log = logger_mod.SysLogger(.{
+const LogNt = logger_mod.SysLogger(.{
     .debug_only = true,
     .backend = .nt_write_file,
+    .max_context_depth = 128,
+});
+
+const LogDebug = logger_mod.SysLogger(.{
+    .debug_only = true,
+    .backend = .std_debug,
     .max_context_depth = 128,
 });
 
@@ -16,7 +23,7 @@ const Phase = enum {
     PathResolve,
 };
 
-fn nestedWork(log: *Log) void {
+fn nestedWork(log: anytype) void {
     log.info("entered nested work", .{});
 
     var scope = log.push("inner-step");
@@ -26,7 +33,7 @@ fn nestedWork(log: *Log) void {
     log.crit("nested warning: example critical message", .{});
 }
 
-fn runBoot(log: *Log) void {
+fn runBoot(log: anytype) void {
     log.info("boot sequence starting", .{});
 
     var scope = log.pushEnum(Phase.Boot);
@@ -37,7 +44,7 @@ fn runBoot(log: *Log) void {
     log.info("boot sequence complete", .{});
 }
 
-fn runAuth(log: *Log) void {
+fn runAuth(log: anytype) void {
     log.info("auth phase entered", .{});
 
     var scope = log.pushEnum(Phase.Auth);
@@ -48,7 +55,7 @@ fn runAuth(log: *Log) void {
     log.crit("authentication failed with code {d}", .{401});
 }
 
-fn runImportFix(log: *Log) void {
+fn runImportFix(log: anytype) void {
     var scope = log.pushEnum(Phase.ImportFix);
     defer scope.end();
 
@@ -56,32 +63,33 @@ fn runImportFix(log: *Log) void {
     log.info("patched {d} IAT entries", .{17});
 }
 
-fn runPathResolve(log: *Log) void {
+fn runPathResolve(log: anytype) void {
     var scope = log.pushEnum(Phase.PathResolve);
     defer scope.end();
 
-    const path16 = W("C:\\Windows\\System32\\kernel32.dll");
-    log.info16("resolved utf16 path", .{}, path16);
+    const ascii_path16 = W("C:\\Windows\\System32\\kernel32.dll");
+    const unicode_path16 = W("C:\\Temp\\example\\example.dll");
+
+    log.info16("resolved utf16 ascii path", .{}, ascii_path16);
+    log.crit16("resolved utf16 unicode path", .{}, unicode_path16);
 }
 
-fn runManualContext(log: *Log) void {
+fn runManualContext(log: anytype) void {
     log.setContext("manual-context");
     defer log.rollbackContext();
 
     log.info("using explicit manual context push/pop", .{});
 }
 
-pub fn main() void {
-    var log = Log.init();
-
-    log.raw_print("=== logger test start ===\n", .{});
+fn runScenario(comptime name: []const u8, log: anytype) void {
+    log.raw_print("\n=== logger test start ({s}) ===\n", .{name});
 
     log.info("main entered", .{});
-    runBoot(&log);
-    runAuth(&log);
-    runImportFix(&log);
-    runPathResolve(&log);
-    runManualContext(&log);
+    runBoot(log);
+    runAuth(log);
+    runImportFix(log);
+    runPathResolve(log);
+    runManualContext(log);
 
     {
         var outer = log.push("outer-scope");
@@ -100,5 +108,15 @@ pub fn main() void {
     }
 
     log.info("main exiting", .{});
-    log.raw_print("=== logger test end ===\n", .{});
+    log.raw_print("=== logger test end ({s}) ===\n", .{name});
+}
+
+pub fn main() void {
+    if (builtin.os.tag == .windows) {
+        var nt_log = LogNt.init();
+        runScenario("nt_write_file", &nt_log);
+    }
+
+    var debug_log = LogDebug.init();
+    runScenario("std_debug", &debug_log);
 }
