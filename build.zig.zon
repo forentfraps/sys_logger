@@ -41,8 +41,8 @@
             .hash = "syscall_manager-0.0.0-M32ynXpEAAA12BbHluYBTUCyEhdGcrgm98aB8NPRwsrx",
         },
         .zigwin32 = .{
-            .url = "git+https://github.com/forentfraps/zigwin32.git#3ca6a91db1958e78160245ea4164745a55bdf895",
-            .hash = "zigwin32-25.0.28-preview-lnxZzOMX5QMGuB1f02Jvuw8iSMiuWlxqrLfy3RlXhIZ0",
+            .url = "git+https://github.com/forentfraps/zigwin32#8d5ff24556250f0ecb16410e9c8af8be3933bc35",
+            .hash = "zigwin32-25.0.28-preview-lnxZzKw_5APSEKqgy0QKGNbwv0bDcYMOcyKB-WR-PE6S",
         },
     },
     .paths = .{
