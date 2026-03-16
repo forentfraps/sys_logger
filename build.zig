@@ -1,7 +1,6 @@
 const std = @import("std");
 pub fn build(b: *std.Build) void {
-    var target = b.standardTargetOptions(.{});
-    target.result.os.tag = .windows;
+    const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const lib_mod = b.addModule("sys_logger", .{
         .root_source_file = b.path("src/root.zig"),
