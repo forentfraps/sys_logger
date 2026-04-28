@@ -279,19 +279,19 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
 
         // Keep wrappers inline so the call to log()/log16() is emitted at the user callsite.
         pub inline fn info(self: *Self, comptime msg: []const u8, args: anytype) void {
-            self.log(.info, msg, args);
+            self.log(.info, msg, args, @returnAddress());
         }
 
         pub inline fn crit(self: *Self, comptime msg: []const u8, args: anytype) void {
-            self.log(.crit, msg, args);
+            self.log(.crit, msg, args, @returnAddress());
         }
 
         pub inline fn info16(self: *Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
-            self.log16(.info, msg, args, arg16);
+            self.log16(.info, msg, args, arg16, @returnAddress());
         }
 
         pub inline fn crit16(self: *Self, comptime msg: []const u8, args: anytype, arg16: []const u16) void {
-            self.log16(.crit, msg, args, arg16);
+            self.log16(.crit, msg, args, arg16, @returnAddress());
         }
 
         pub inline fn setContext(self: *Self, comptime label: []const u8) void {
@@ -320,12 +320,18 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
 
             var fba = std.heap.FixedBufferAllocator.init(scratch);
             const gpa = fba.allocator();
-            var threaded = std.Io.Threaded.init(gpa, .{});
+            var threaded = std.Io.Threaded.init(gpa, .{
+                .environ = .empty,
+            });
             const io = threaded.io();
 
             const di = std.debug.getSelfDebugInfo() catch return .{};
-            const sym = di.getSymbol(io, lookup_addr) catch return .{};
+            var symbols =
+                std.ArrayList(std.debug.Symbol).initCapacity(gpa, 1) catch
+                    return .{};
+            di.getSymbols(io, gpa, gpa, lookup_addr, false, &symbols) catch return .{};
 
+            const sym = symbols.items[0];
             return .{
                 .fn_name = if (sym.name) |name| shortFnName(name) else "???",
                 .line = if (sym.source_location) |loc| loc.line else 0,
@@ -337,6 +343,7 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             comptime sev: Severity,
             comptime msg: []const u8,
             args: anytype,
+            ret_addr: usize,
         ) void {
             if (!self.enabled) return;
 
@@ -344,7 +351,7 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             const payload = std.fmt.bufPrint(&msg_buf, msg, args) catch return;
 
             var caller_scratch: [512]u8 = undefined;
-            const site = resolveCallerSite(@returnAddress(), caller_scratch[0..]);
+            const site = resolveCallerSite(ret_addr, caller_scratch[0..]);
 
             var line_buf: [opts.line_buf_size]u8 = undefined;
             const colour = switch (sev) {
@@ -377,6 +384,7 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             comptime msg: []const u8,
             args: anytype,
             arg16: []const u16,
+            ret_addr: usize,
         ) void {
             if (!self.enabled) return;
 
@@ -384,7 +392,7 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             const payload = std.fmt.bufPrint(&msg_buf, msg, args) catch return;
 
             var caller_scratch: [512]u8 = undefined;
-            const site = resolveCallerSite(@returnAddress(), caller_scratch[0..]);
+            const site = resolveCallerSite(ret_addr, caller_scratch[0..]);
 
             var line_buf: [opts.line_buf_size]u8 = undefined;
             const colour = switch (sev) {
