@@ -191,12 +191,12 @@ pub const LoggerOptions = struct {
     backend: LoggerBackend = .nt_write_file,
 
     // Replaces the old u256-packed history with a real stack.
-    max_context_depth: usize = 256,
+    max_context_depth: usize = 2560,
 
     // Formatting buffers.
-    msg_buf_size: usize = 1024,
-    line_buf_size: usize = 1536,
-    ctx_buf_size: usize = 256,
+    msg_buf_size: usize = 10240,
+    line_buf_size: usize = 15360,
+    ctx_buf_size: usize = 2560,
 
     // Output style.
     show_function: bool = true,
@@ -497,4 +497,3 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
         }
     };
 }
-
