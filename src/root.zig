@@ -350,7 +350,7 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             var msg_buf: [opts.msg_buf_size]u8 = undefined;
             const payload = std.fmt.bufPrint(&msg_buf, msg, args) catch return;
 
-            var caller_scratch: [512]u8 = undefined;
+            var caller_scratch: [0x2000]u8 = undefined;
             const site = resolveCallerSite(ret_addr, caller_scratch[0..]);
 
             var line_buf: [opts.line_buf_size]u8 = undefined;
