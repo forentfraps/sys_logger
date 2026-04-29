@@ -203,6 +203,16 @@ pub const LoggerOptions = struct {
     show_line: bool = true,
     show_context_chain: bool = true,
 
+    /// Resolve the calling function name + source line via PDB/DWARF on every
+    /// log line. Default is OFF because Zig 0.17's PDB parser
+    /// (std.debug.Pdb.getLineNumberInfo → getFileName → streamDelimiterLimit
+    /// → Reader.rebase) panics with `integerOverflow` on certain string
+    /// table reads. The parser also has no early-out for "address not in
+    /// our PDB" — addresses inside reflectively-loaded DLLs hit the same
+    /// fragile path. When OFF we fall back to printing the raw return
+    /// address as a hex pointer the user can symbolize later.
+    resolve_caller_site: bool = false,
+
     info_palette: []const SysLoggerColour = default_palette[0..],
     crit_colour: SysLoggerColour = .white_on_red,
 };
@@ -314,9 +324,29 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             self.context_depth -= 1;
         }
 
+        /// Per-thread guard. Even with the parser enabled, a hook fired during
+        /// PDB symbol resolution must not recurse into resolveCallerSite —
+        /// nested calls return a stub immediately.
         threadlocal var in_resolve_caller_site: bool = false;
 
         fn resolveCallerSite(ret_addr: usize, scratch: []u8) CallerSite {
+            // Default-off: Zig 0.17's PDB string-table reader can panic with
+            // `integerOverflow` inside Reader.rebase when called from random
+            // load contexts (observed: ResolveDelayLoadedAPI_stub →
+            // finalizeAndInitDll → log16 → resolveCallerSite → getSymbols
+            // → getLineNumberInfo → getFileName → streamDelimiterLimit →
+            // peekGreedy → fillUnbuffered → rebase). The panic is in std lib
+            // and unreachable from user code via try/catch, so the only safe
+            // option is to skip the resolver entirely and surface the raw
+            // return address instead. The caller still gets enough info to
+            // symbolize externally (addr2line / IDA).
+            if (!opts.resolve_caller_site) {
+                return .{
+                    .fn_name = "???",
+                    .line = ret_addr, // raw return address, hex-printable as line
+                };
+            }
+
             if (in_resolve_caller_site) return .{};
             in_resolve_caller_site = true;
             defer in_resolve_caller_site = false;
@@ -336,6 +366,9 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
                     return .{};
             di.getSymbols(io, gpa, gpa, lookup_addr, false, &symbols) catch return .{};
 
+            // `getSymbols` may report success with zero symbols (cold address
+            // not in any compile unit). Without the bounds check we'd panic
+            // on `[0]`.
             if (symbols.items.len == 0) return .{};
 
             const sym = symbols.items[0];
@@ -366,18 +399,22 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
                 .crit => opts.crit_colour,
             };
 
+            // Hex-format the "line" slot when it's actually a raw return
+            // address (resolver disabled). Decimal-format when it's a real
+            // source line number. Comptime selection — no runtime cost.
+            const line_fmt = if (opts.resolve_caller_site) "{d}" else "0x{x}";
             const full_line = if (opts.show_context_chain and self.context_depth != 0) blk: {
                 var ctx_buf: [opts.ctx_buf_size]u8 = undefined;
                 const ctx = self.contextChain(&ctx_buf);
                 break :blk std.fmt.bufPrint(
                     &line_buf,
-                    "{s}[{s}:{d} | {s}] {s}{s}\n",
+                    "{s}[{s}:" ++ line_fmt ++ " | {s}] {s}{s}\n",
                     .{ colour.ansi(), site.fn_name, site.line, ctx, payload, SysLoggerColour.reset() },
                 ) catch return;
             } else blk: {
                 break :blk std.fmt.bufPrint(
                     &line_buf,
-                    "{s}[{s}:{d}] {s}{s}\n",
+                    "{s}[{s}:" ++ line_fmt ++ "] {s}{s}\n",
                     .{ colour.ansi(), site.fn_name, site.line, payload, SysLoggerColour.reset() },
                 ) catch return;
             };
@@ -410,18 +447,19 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
                 .crit => opts.crit_colour,
             };
 
+            const line_fmt = if (opts.resolve_caller_site) "{d}" else "0x{x}";
             const prefix = if (opts.show_context_chain and self.context_depth != 0) blk: {
                 var ctx_buf: [opts.ctx_buf_size]u8 = undefined;
                 const ctx = self.contextChain(&ctx_buf);
                 break :blk std.fmt.bufPrint(
                     &line_buf,
-                    "{s}[{s}:{d} | {s}] {s} -> ",
+                    "{s}[{s}:" ++ line_fmt ++ " | {s}] {s} -> ",
                     .{ colour.ansi(), site.fn_name, site.line, ctx, payload },
                 ) catch return;
             } else blk: {
                 break :blk std.fmt.bufPrint(
                     &line_buf,
-                    "{s}[{s}:{d}] {s} -> ",
+                    "{s}[{s}:" ++ line_fmt ++ "] {s} -> ",
                     .{ colour.ansi(), site.fn_name, site.line, payload },
                 ) catch return;
             };
