@@ -314,8 +314,13 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             self.context_depth -= 1;
         }
 
+        threadlocal var in_resolve_caller_site: bool = false;
+
         fn resolveCallerSite(ret_addr: usize, scratch: []u8) CallerSite {
-            // ret_addr is the address *after* the call. Move back into the callsite.
+            if (in_resolve_caller_site) return .{};
+            in_resolve_caller_site = true;
+            defer in_resolve_caller_site = false;
+
             const lookup_addr = ret_addr -| 1;
 
             var fba = std.heap.FixedBufferAllocator.init(scratch);
@@ -330,6 +335,8 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
                 std.ArrayList(std.debug.Symbol).initCapacity(gpa, 1) catch
                     return .{};
             di.getSymbols(io, gpa, gpa, lookup_addr, false, &symbols) catch return .{};
+
+            if (symbols.items.len == 0) return .{};
 
             const sym = symbols.items[0];
             return .{
@@ -350,7 +357,7 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             var msg_buf: [opts.msg_buf_size]u8 = undefined;
             const payload = std.fmt.bufPrint(&msg_buf, msg, args) catch return;
 
-            var caller_scratch: [0x2000]u8 = undefined;
+            var caller_scratch: [512]u8 = undefined;
             const site = resolveCallerSite(ret_addr, caller_scratch[0..]);
 
             var line_buf: [opts.line_buf_size]u8 = undefined;
@@ -391,7 +398,10 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
             var msg_buf: [opts.msg_buf_size]u8 = undefined;
             const payload = std.fmt.bufPrint(&msg_buf, msg, args) catch return;
 
-            var caller_scratch: [512]u8 = undefined;
+            // Match log()'s 8 KiB scratch — 512 B caused the DWARF/PDB parser
+            // to OOM mid-section-read in nested-hook contexts and panic with
+            // "index out of bounds: index N, len M".
+            var caller_scratch: [0x2000]u8 = undefined;
             const site = resolveCallerSite(ret_addr, caller_scratch[0..]);
 
             var line_buf: [opts.line_buf_size]u8 = undefined;
@@ -487,3 +497,4 @@ fn ActiveLogger(comptime opts: LoggerOptions) type {
         }
     };
 }
+
