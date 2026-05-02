@@ -1,17 +1,22 @@
 const std = @import("std");
 pub fn build(b: *std.Build) void {
-    var target = b.standardTargetOptions(.{});
-    target.result.os.tag = .windows;
+    const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const lib_mod = b.addModule("sys_logger", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const syscall_dep = b.dependency("syscall_manager", .{});
+    const syscall_dep = b.dependency("syscall_manager", .{
+        .optimize = optimize,
+        .target = target,
+    });
     const syscall_module = syscall_dep.module("syscall_manager");
     lib_mod.addImport("syscall_manager", syscall_module);
-    const zigwin32 = b.dependency("zigwin32", .{});
+    const zigwin32 = b.dependency("zigwin32", .{
+        .optimize = optimize,
+        .target = target,
+    });
     lib_mod.addImport("zigwin32", zigwin32.module("win32"));
     const lib = b.addLibrary(.{
         .name = "sys_logger",

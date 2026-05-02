@@ -37,12 +37,12 @@
     // internet connectivity.
     .dependencies = .{
         .syscall_manager = .{
-            .url = "git+https://github.com/forentfraps/syscall_manager.git#2ce6ef27d1392bc51803b4ca26b795d533a4120c",
-            .hash = "syscall_manager-0.0.0-M32ynXpEAAA12BbHluYBTUCyEhdGcrgm98aB8NPRwsrx",
+            .url = "git+https://github.com/forentfraps/syscall_manager.git#83c21dd46bde0f9b969a34201c41c066f85c13fa",
+            .hash = "syscall_manager-0.0.0-M32ynX1EAACsGzB2HaHtmEp9EnXbGBDqgmIIW1oIMl9L",
         },
         .zigwin32 = .{
-            .url = "git+https://github.com/forentfraps/zigwin32.git#3ca6a91db1958e78160245ea4164745a55bdf895",
-            .hash = "zigwin32-25.0.28-preview-lnxZzOMX5QMGuB1f02Jvuw8iSMiuWlxqrLfy3RlXhIZ0",
+            .url = "git+https://github.com/forentfraps/zigwin32.git#8c5763fe9e98e2ffd774b339ad38a5cc36f7d667",
+            .hash = "zigwin32-25.0.28-preview-lnxZzElA5AP4vKjhWkvhnFIk0q_27QDGeAuF0B9Mrq3_",
         },
     },
     .paths = .{
